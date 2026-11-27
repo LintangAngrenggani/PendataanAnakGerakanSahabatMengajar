@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-$DB_HOST = '127.0.0.1';
-$DB_NAME = 'gsm_management';
-$DB_USER = 'root';
-$DB_PASS = '';
+$DB_HOST = 'sql311.infinityfree.com';    
+$DB_NAME = 'if0_42458480_gsm_management'; 
+$DB_USER = 'if0_42458480';                
+$DB_PASS = 'Gerakan20';           
 $DB_CHARSET = 'utf8mb4';
 
 $dsn = "mysql:host={$DB_HOST};dbname={$DB_NAME};charset={$DB_CHARSET}";
