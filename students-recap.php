@@ -7,6 +7,49 @@ function proteksi(string $teks): string {
     return htmlspecialchars($teks, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+// Kredensial akses edit
+const EDIT_USERNAME = 'koneksi';
+const EDIT_PASSWORD = 'koneksioke';
+
+$pesanNotifikasi = '';
+$tipeNotif = 'danger';
+$bukaModalLogin = false;
+$tujuanEditSetelahLogin = '';
+
+// --- PROSES LOGIN AKSES EDIT ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'login_edit') {
+    $inputUser = trim((string)($_POST['username'] ?? ''));
+    $inputPass = (string)($_POST['password'] ?? '');
+    $redirectId = (int)($_POST['redirect_student_id'] ?? 0);
+
+    if (hash_equals(EDIT_USERNAME, $inputUser) && hash_equals(EDIT_PASSWORD, $inputPass)) {
+        $_SESSION['akses_edit_gsm'] = true;
+        if ($redirectId > 0) {
+            header('Location: edit-student.php?id=' . $redirectId);
+            exit;
+        }
+        $pesanNotifikasi = '🔓 Akses edit berhasil dibuka!';
+        $tipeNotif = 'success';
+    } else {
+        $_SESSION['akses_edit_gsm'] = false;
+        $pesanNotifikasi = '🚫 Username atau password salah! Akses edit ditolak.';
+        $tipeNotif = 'danger';
+        $bukaModalLogin = true;
+        if ($redirectId > 0) {
+            $tujuanEditSetelahLogin = (string)$redirectId;
+        }
+    }
+}
+
+// --- PROSES LOGOUT AKSES EDIT ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'logout_edit') {
+    unset($_SESSION['akses_edit_gsm']);
+    $pesanNotifikasi = '🔒 Akses edit telah dikunci kembali.';
+    $tipeNotif = 'warning';
+}
+
+$punyaAksesEdit = !empty($_SESSION['akses_edit_gsm']);
+
 try {
     $query = $pdo->query('SELECT id, child_name, age, school_class, phone_number, photo_path FROM students ORDER BY child_name ASC');
     $semuaSiswa = $query->fetchAll();
@@ -87,6 +130,21 @@ try {
             box-shadow: 5px 5px 0px #1e293b;
             transform: translate(-1px, -1px);
         }
+        .btn-auth-fun {
+            font-family: 'Fredoka', sans-serif;
+            font-weight: 700;
+            border: 3px solid #1e293b;
+            border-radius: 14px;
+            padding: 10px 18px;
+            box-shadow: 4px 4px 0px #1e293b;
+            background-color: #9bf6ff;
+            color: #1e293b !important;
+            transition: all 0.1s ease-in-out;
+        }
+        .btn-auth-fun:hover {
+            box-shadow: 5px 5px 0px #1e293b;
+            transform: translate(-1px, -1px);
+        }
         .avatar-frame {
             width: 85px;
             height: 85px;
@@ -146,6 +204,12 @@ try {
             box-shadow: 3px 3px 0px #1e293b;
             background-color: #e6a900;
         }
+        .notif-toast {
+            border: 3px solid #1e293b;
+            box-shadow: 4px 4px 0px #1e293b;
+            border-radius: 16px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -160,11 +224,35 @@ try {
                 <small class="text-muted fw-bold" style="font-size: 0.8rem; letter-spacing: 0.5px;">Database Anak Aktif Pengajaran</small>
             </div>
         </div>
-        <a href="index.php" class="btn btn-header-nav w-100 w-md-auto text-center">🏠 Menu Utama</a>
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+            <?php if ($punyaAksesEdit): ?>
+                <form method="POST" action="" class="d-inline">
+                    <input type="hidden" name="action" value="logout_edit">
+                    <button type="submit" class="btn btn-auth-fun">🔓 Kunci Edit</button>
+                </form>
+            <?php else: ?>
+                <button type="button" class="btn btn-auth-fun" data-bs-toggle="modal" data-bs-target="#modalLoginEdit" data-student-id="">
+                    🔐 Login Edit
+                </button>
+            <?php endif; ?>
+            <a href="index.php" class="btn btn-header-nav text-center">🏠 Menu Utama</a>
+        </div>
     </div>
 </nav>
 
 <main class="container mb-5">
+    <?php if ($pesanNotifikasi !== ''): ?>
+        <?php
+            $bgNotif = '#ffccd5';
+            if ($tipeNotif === 'success') $bgNotif = '#b8f2e6';
+            if ($tipeNotif === 'warning') $bgNotif = '#fff3b0';
+        ?>
+        <div class="alert notif-toast alert-dismissible fade show p-3 mb-4" style="background-color: <?= $bgNotif ?>; color: #1e293b;" role="alert">
+            <?= proteksi($pesanNotifikasi) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <?php endif; ?>
+
     <div class="p-4 mb-5 text-center bubble-card" style="background-color: #9bf6ff;">
         <h2 class="mb-2 text-dark">✨ Recap Anak & Total Kehadiran ✨</h2>
         <p class="fs-5 mb-3 text-dark opacity-75">Berikut rangkuman data diri anak-anak hebat berserta akumulasi keaktifan mereka kelas!</p>
@@ -213,7 +301,13 @@ try {
                                 <span class="badge badge-hadir px-3 py-1.5">
                                     🏃‍♂️ Hadir: <?= $jumlahKehadiran ?> Kali
                                 </span>
-                                <a href="edit-student.php?id=<?= $idSiswa ?>" class="btn-edit-fun">✏️ Edit Profil</a>
+                                <?php if ($punyaAksesEdit): ?>
+                                    <a href="edit-student.php?id=<?= $idSiswa ?>" class="btn-edit-fun">✏️ Edit Profil</a>
+                                <?php else: ?>
+                                    <button type="button" class="btn-edit-fun" data-bs-toggle="modal" data-bs-target="#modalLoginEdit" data-student-id="<?= $idSiswa ?>">
+                                        🔐 Edit Profil
+                                    </button>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -222,6 +316,60 @@ try {
         <?php endif; ?>
     </div>
 </main>
+
+<!-- MODAL LOGIN AKSES EDIT -->
+<div class="modal fade" id="modalLoginEdit" tabindex="-1" aria-labelledby="modalLoginEditLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bubble-card p-2">
+            <div class="modal-header border-bottom border-2 border-dark">
+                <h5 class="modal-title" id="modalLoginEditLabel" style="font-family:'Fredoka';">🔐 Verifikasi Akses Edit</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="login_edit">
+                    <input type="hidden" name="redirect_student_id" id="redirectStudentId" value="<?= proteksi($tujuanEditSetelahLogin) ?>">
+                    <p class="small text-muted fw-bold mb-3">Masukkan username dan password untuk mengakses halaman edit profil.</p>
+                    <div class="mb-3">
+                        <label for="inputUsername" class="form-label fw-bold">Username</label>
+                        <input type="text" class="form-control border-2 border-dark rounded-3 fw-bold" id="inputUsername" name="username" placeholder="Masukkan username" required autocomplete="username">
+                    </div>
+                    <div class="mb-2">
+                        <label for="inputPassword" class="form-label fw-bold">Password</label>
+                        <input type="password" class="form-control border-2 border-dark rounded-3 fw-bold" id="inputPassword" name="password" placeholder="Masukkan password" required autocomplete="current-password">
+                    </div>
+                </div>
+                <div class="modal-footer border-top border-2 border-dark">
+                    <button type="button" class="btn btn-outline-dark fw-bold rounded-3" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn-excel-fun">🔓 Masuk & Edit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const modalLoginEl = document.getElementById('modalLoginEdit');
+if (modalLoginEl) {
+    modalLoginEl.addEventListener('show.bs.modal', function (event) {
+        const triggerBtn = event.relatedTarget;
+        const redirectInput = document.getElementById('redirectStudentId');
+        if (triggerBtn && redirectInput) {
+            redirectInput.value = triggerBtn.getAttribute('data-student-id') || '';
+        }
+    });
+}
+</script>
+
+<?php if ($bukaModalLogin): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modalInstance = new bootstrap.Modal(document.getElementById('modalLoginEdit'));
+    modalInstance.show();
+});
+</script>
+<?php endif; ?>
 
 </body>
 </html>
