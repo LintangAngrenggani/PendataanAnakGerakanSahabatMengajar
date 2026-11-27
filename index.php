@@ -7,7 +7,12 @@ if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
+// Kredensial akses edit / input data
+const EDIT_USERNAME = 'koneksi';
+const EDIT_PASSWORD = 'koneksioke';
+
 $notifikasi = ['tipe' => null, 'pesan' => null];
+$bukaModalLogin = false;
 
 function proteksi(string $teks): string {
     return htmlspecialchars($teks, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -24,71 +29,90 @@ $tanggalSesiAktif = $_SESSION['active_teaching_date'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $tokenForm = (string)($_POST['csrf_token'] ?? '');
     $jenisForm = (string)($_POST['form_type'] ?? '');
-    
+
     if (!hash_equals($_SESSION['csrf_token'], $tokenForm)) {
         $notifikasi = ['tipe' => 'danger', 'pesan' => 'Waktu Sesi habis, yuk muat ulang halaman!'];
+    } elseif ($jenisForm === 'login_edit') {
+        $inputUser = trim((string)($_POST['username'] ?? ''));
+        $inputPass = (string)($_POST['password'] ?? '');
+
+        if (hash_equals(EDIT_USERNAME, $inputUser) && hash_equals(EDIT_PASSWORD, $inputPass)) {
+            $_SESSION['akses_edit_gsm'] = true;
+            $notifikasi = ['tipe' => 'success', 'pesan' => '🔓 Akses edit & input berhasil dibuka!'];
+        } else {
+            $_SESSION['akses_edit_gsm'] = false;
+            $notifikasi = ['tipe' => 'danger', 'pesan' => '🚫 Username atau password salah!'];
+            $bukaModalLogin = true;
+        }
+    } elseif ($jenisForm === 'logout_edit') {
+        unset($_SESSION['akses_edit_gsm']);
+        $notifikasi = ['tipe' => 'warning', 'pesan' => '🔒 Akses edit & input telah dikunci kembali.'];
     } else {
-        $kendala = [];
+        if (empty($_SESSION['akses_edit_gsm'])) {
+            $notifikasi = ['tipe' => 'danger', 'pesan' => '🔒 Masukkan username & password terlebih dahulu untuk menyimpan data!'];
+            $bukaModalLogin = true;
+        } else {
+            $kendala = [];
 
-        if ($jenisForm === 'register_child') {
-            $namaAnak = trim((string)($_POST['child_name'] ?? ''));
-            $umurAnak = (int)($_POST['age'] ?? 0);
-            $kelasAnak = trim((string)($_POST['school_class'] ?? ''));
-            $noHp = trim((string)($_POST['phone_number'] ?? ''));
+            if ($jenisForm === 'register_child') {
+                $namaAnak = trim((string)($_POST['child_name'] ?? ''));
+                $umurAnak = (int)($_POST['age'] ?? 0);
+                $kelasAnak = trim((string)($_POST['school_class'] ?? ''));
+                $noHp = trim((string)($_POST['phone_number'] ?? ''));
 
-            if ($namaAnak === '') $kendala[] = 'Nama Anak jangan sampai kosong!';
-            if ($umurAnak <= 0) $kendala[] = 'Umur anak harus diisi dengan angka yang benar!';
-            if ($kelasAnak === '') $kendala[] = 'Kelas sekolah anak mohon diisi!';
+                if ($namaAnak === '') $kendala[] = 'Nama Anak jangan sampai kosong!';
+                if ($umurAnak <= 0) $kendala[] = 'Umur anak harus diisi dengan angka yang benar!';
+                if ($kelasAnak === '') $kendala[] = 'Kelas sekolah anak mohon diisi!';
 
-            $namaFileFoto = null;
-            if (count($kendala) === 0 && isset($_FILES['child_photo']) && $_FILES['child_photo']['error'] === UPLOAD_ERR_OK) {
-                $ekstensi = strtolower(pathinfo($_FILES['child_photo']['name'], PATHINFO_EXTENSION));
-                if (in_array($ekstensi, ['jpg', 'jpeg', 'png', 'webp'], true)) {
-                    $namaFileFoto = bin2hex(random_bytes(16)) . '.' . $ekstensi;
-                    if (!is_dir(__DIR__ . '/uploads')) {
-                        mkdir(__DIR__ . '/uploads', 0777, true);
+                $namaFileFoto = null;
+                if (count($kendala) === 0 && isset($_FILES['child_photo']) && $_FILES['child_photo']['error'] === UPLOAD_ERR_OK) {
+                    $ekstensi = strtolower(pathinfo($_FILES['child_photo']['name'], PATHINFO_EXTENSION));
+                    if (in_array($ekstensi, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                        $namaFileFoto = bin2hex(random_bytes(16)) . '.' . $ekstensi;
+                        if (!is_dir(__DIR__ . '/uploads')) {
+                            mkdir(__DIR__ . '/uploads', 0777, true);
+                        }
+                        move_uploaded_file($_FILES['child_photo']['tmp_name'], __DIR__ . '/uploads/' . $namaFileFoto);
+                    } else {
+                        $kendala[] = 'Format foto wajib JPG, PNG, atau WEBP!';
                     }
-                    move_uploaded_file($_FILES['child_photo']['tmp_name'], __DIR__ . '/uploads/' . $namaFileFoto);
-                } else {
-                    $kendala[] = 'Format foto wajib JPG, PNG, atau WEBP!';
+                }
+
+                if (count($kendala) === 0) {
+                    $kirimData = $pdo->prepare('INSERT INTO students (child_name, age, school_class, phone_number, photo_path) VALUES (?, ?, ?, ?, ?)');
+                    $kirimData->execute([$namaAnak, $umurAnak, $kelasAnak, $noHp, $namaFileFoto]);
+                    header('Location: index.php?sukses=anak_baru');
+                    exit;
+                }
+            } elseif ($jenisForm === 'mark_attendance') {
+                $studentId = (int)($_POST['student_id'] ?? 0);
+
+                if ($studentId <= 0) {
+                    $kendala[] = 'Silakan pilih nama anak didik terlebih dahulu ya!';
+                }
+
+                if (count($kendala) === 0) {
+                    $jsonHasil = json_encode(['attendance' => true, 'stationery' => true, 'homework' => true, 'behavior_good' => true]);
+                    $kirimPresensi = $pdo->prepare('INSERT INTO attendance_records (student_id, session_date, checklist_json) VALUES (?, ?, ?)');
+                    $kirimPresensi->execute([$studentId, $tanggalSesiAktif, $jsonHasil]);
+                    header('Location: index.php?sukses=absen_oke');
+                    exit;
                 }
             }
 
-            if (count($kendala) === 0) {
-                $kirimData = $pdo->prepare('INSERT INTO students (child_name, age, school_class, phone_number, photo_path) VALUES (?, ?, ?, ?, ?)');
-                $kirimData->execute([$namaAnak, $umurAnak, $kelasAnak, $noHp, $namaFileFoto]);
-                header('Location: index.php?sukses=anak_baru');
-                exit;
+            if (count($kendala) > 0) {
+                $notifikasi = ['tipe' => 'warning', 'pesan' => implode(' ', $kendala)];
             }
-        }
-        
-        elseif ($jenisForm === 'mark_attendance') {
-            $studentId = (int)($_POST['student_id'] ?? 0);
-            $statusHadir = (string)($_POST['attendance_status'] ?? '0');
-
-            if ($studentId <= 0) {
-                $kendala[] = 'Silakan pilih nama anak didik terlebih dahulu ya!';
-            }
-
-            if (count($kendala) === 0) {
-                $jsonHasil = json_encode(['attendance' => ($statusHadir === '1'), 'stationery'=>true, 'homework'=>true, 'behavior_good'=>true]);
-                $kirimPresensi = $pdo->prepare('INSERT INTO attendance_records (student_id, session_date, checklist_json) VALUES (?, ?, ?)');
-                $kirimPresensi->execute([$studentId, $tanggalSesiAktif, $jsonHasil]);
-                header('Location: index.php?sukses=absen_oke');
-                exit;
-            }
-        }
-
-        if (count($kendala) > 0) {
-            $notifikasi = ['tipe' => 'warning', 'pesan' => implode(' ', $kendala)];
         }
     }
 }
 
+$punyaAksesEdit = !empty($_SESSION['akses_edit_gsm']);
+
 if (($_GET['sukses'] ?? '') === 'anak_baru') {
     $notifikasi = ['tipe' => 'success', 'pesan' => 'Hore! Data Anak baru berhasil disimpan! 🎉'];
 } elseif (($_GET['sukses'] ?? '') === 'absen_oke') {
-    $notifikasi = ['tipe' => 'success', 'pesan' => 'Presensi harian berhasil dicatat! Mantap! 👍'];
+    $notifikasi = ['tipe' => 'success', 'pesan' => 'Presensi kehadiran berhasil dicatat! Mantap! 👍'];
 }
 
 $totalAnakAktif = (int)$pdo->query('SELECT COUNT(*) FROM students')->fetchColumn();
@@ -116,17 +140,6 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
             background-color: #ffffff;
             border-bottom: 4px solid #1e293b;
             box-shadow: 0 4px 0px #1e293b;
-        }
-        .logo-gsm-box {
-            background-color: #ff006e;
-            color: white;
-            padding: 6px 14px;
-            border: 3px solid #1e293b;
-            border-radius: 12px;
-            box-shadow: 2px 2px 0px #1e293b;
-            font-weight: 900;
-            font-family: 'Fredoka', sans-serif;
-            letter-spacing: 1px;
         }
         .bubble-card {
             background: #ffffff;
@@ -158,6 +171,8 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
         .btn-nav-blue { background-color: #3a86ff; color: white !important; }
         .btn-nav-yellow { background-color: #ffbe0b; color: #1e293b !important; }
         .btn-nav-purple { background-color: #9b5de5; color: white !important; }
+        .btn-nav-orange { background-color: #fb5607; color: white !important; }
+        .btn-nav-auth { background-color: #9bf6ff; color: #1e293b !important; }
 
         .btn-submit-fun {
             background-color: #06d6a0;
@@ -193,7 +208,7 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
         }
         .nav-tabs-fun .nav-link {
             border: 3px solid #1e293b !important;
-            border-radius: 14px 14px 14px 14px;
+            border-radius: 14px;
             font-weight: 900;
             background: #e2e8f0;
             color: #1e293b;
@@ -235,14 +250,31 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
        </a>
         
         <div class="d-flex flex-wrap w-100 w-md-auto gap-2 gap-md-3 justify-content-center">
+            <?php if ($punyaAksesEdit): ?>
+                <form method="post" class="d-inline flex-fill flex-md-grow-0">
+                    <input type="hidden" name="csrf_token" value="<?= proteksi((string)$_SESSION['csrf_token']) ?>">
+                    <input type="hidden" name="form_type" value="logout_edit">
+                    <button type="submit" class="btn btn-header-nav btn-nav-auth w-100">🔓 Kunci Edit</button>
+                </form>
+            <?php else: ?>
+                <button type="button" class="btn btn-header-nav btn-nav-auth flex-fill flex-md-grow-0" data-bs-toggle="modal" data-bs-target="#modalLoginEdit">
+                    🔐 Login Edit
+                </button>
+            <?php endif; ?>
             <a href="students-recap.php" class="btn btn-header-nav btn-nav-blue flex-fill flex-md-grow-0">
                 👶 Profil Anak Aktif
             </a>
-            <a href="recap.php" class="btn btn-header-nav btn-nav-yellow flex-fill flex-md-grow-0">
-                📅 Riwayat Sesi Pengajaran
+            <a href="rapot.php" class="btn btn-header-nav btn-nav-orange flex-fill flex-md-grow-0">
+                📊 Rapot Anak
             </a>
-            <a href="proker.php" class="btn btn-header-nav btn-nav-purple flex-fill flex-md-grow-0" style="background-color: #9b5de5; color: white !important;">
+            <a href="recap.php" class="btn btn-header-nav btn-nav-yellow flex-fill flex-md-grow-0">
+                📅 Riwayat Sesi
+            </a>
+            <a href="proker.php" class="btn btn-header-nav btn-nav-purple flex-fill flex-md-grow-0">
                 📋 Agenda Proker
+            </a>
+            <a href="jarkoman.php" class="btn btn-header-nav btn-nav-purple flex-fill flex-md-grow-0">
+                📣 Jarkoman WA
             </a>
         </div>
     </div>
@@ -253,7 +285,7 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
         <div class="col-12 col-md-4">
             <a href="students-recap.php" class="text-decoration-none text-dark">
                 <div class="bubble-card p-3 p-md-4 text-center h-100" style="background-color: #ffc6ff;">
-                    <h6 class="text-uppercase fw-black mb-1" style="letter-spacing:1px; font-size: 0.85rem;">Data Anak Anak Aktif</h6>
+                    <h6 class="text-uppercase fw-black mb-1" style="letter-spacing:1px; font-size: 0.85rem;">Data Anak Aktif</h6>
                     <div class="display-4 fw-black" style="font-family:'Fredoka';"><?= $totalAnakAktif ?></div>
                     <span class="badge bg-dark px-2 py-1 rounded-pill mt-1" style="font-size:0.75rem;">Lihat Detail Anak 🔍</span>
                 </div>
@@ -284,6 +316,13 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
             <?php endif; ?>
 
             <div class="bubble-card p-3 p-md-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-bold small text-muted">Status Form Input:</span>
+                    <span class="badge <?= $punyaAksesEdit ? 'bg-success' : 'bg-secondary' ?> px-3 py-1.5 rounded-pill">
+                        <?= $punyaAksesEdit ? '🔓 AKSES TERBUKA' : '🔒 PERLU LOGIN' ?>
+                    </span>
+                </div>
+
                 <ul class="nav nav-tabs nav-tabs-fun border-0 mb-4" id="funTab" role="tablist">
                     <li class="nav-item">
                         <button class="nav-link active" id="absen-tab" data-bs-toggle="tab" data-bs-target="#absen-panel" type="button">📝 ISI PRESENSI PENGAJARAN</button>
@@ -302,23 +341,21 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
                             <div class="col-12">
                                 <label class="form-label fw-bold text-dark" style="font-size: 0.9rem;">Pilih Anak Yang Hadir:</label>
                                 <select class="form-select fs-6" name="student_id" required>
-                                    <option value="" disabled selected>-- Pilih Siapa Yang Datang --</option>
+                                    <option value="" disabled selected>-- Pilih Anak Yang Hadir --</option>
                                     <?php foreach ($dataSiswa as $siswa): ?>
                                         <option value="<?= (int)$siswa['id'] ?>"><?= proteksi($siswa['child_name']) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
 
-                            <div class="col-12 mt-2">
-                                <label class="form-label fw-bold text-dark" style="font-size: 0.9rem;">Status Kehadiran:</label>
-                                <select class="form-select fs-6" name="attendance_status">
-                                    <option value="1" selected>🟢 HADIR & SEMANGAT BELAJAR!</option>
-                                    <option value="0">🔴 HALANGAN / IZIN</option>
-                                </select>
-                            </div>
-
                             <div class="col-12 text-center pt-3">
-                                <button type="submit" class="btn btn-submit-fun w-100 py-2.5 fs-6">💾 Simpan Presensi Anak</button>
+                                <?php if ($punyaAksesEdit): ?>
+                                    <button type="submit" class="btn btn-submit-fun w-100 py-2.5 fs-6">💾 Simpan Kehadiran Anak</button>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-submit-fun w-100 py-2.5 fs-6" data-bs-toggle="modal" data-bs-target="#modalLoginEdit">
+                                        🔐 Login untuk Simpan Kehadiran
+                                    </button>
+                                <?php endif; ?>
                             </div>
                         </form>
                     </div>
@@ -354,7 +391,13 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
                             </div>
 
                             <div class="col-12 text-center pt-3">
-                                <button type="submit" class="btn btn-submit-fun w-100 py-2.5 fs-6" style="background-color: #ff006e;">✨ Daftarkan Anak Baru</button>
+                                <?php if ($punyaAksesEdit): ?>
+                                    <button type="submit" class="btn btn-submit-fun w-100 py-2.5 fs-6" style="background-color: #ff006e;">✨ Daftarkan Anak Baru</button>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-submit-fun w-100 py-2.5 fs-6" style="background-color: #ff006e;" data-bs-toggle="modal" data-bs-target="#modalLoginEdit">
+                                        🔐 Login untuk Daftarkan Anak Baru
+                                    </button>
+                                <?php endif; ?>
                             </div>
                         </form>
                     </div>
@@ -365,6 +408,47 @@ $dataSiswa = $pdo->query('SELECT id, child_name FROM students ORDER BY child_nam
     </div>
 </main>
 
+<!-- MODAL LOGIN AKSES EDIT & INPUT -->
+<div class="modal fade" id="modalLoginEdit" tabindex="-1" aria-labelledby="modalLoginEditLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bubble-card p-2">
+            <div class="modal-header border-bottom border-3 border-dark">
+                <h5 class="modal-title fun-title" id="modalLoginEditLabel">🔐 Verifikasi Akses Edit & Input</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?= proteksi((string)$_SESSION['csrf_token']) ?>">
+                    <input type="hidden" name="form_type" value="login_edit">
+                    <p class="small text-muted fw-bold mb-3">Masukkan username dan password untuk mengaktifkan akses input dan ubah data.</p>
+                    <div class="mb-3">
+                        <label for="inputUsername" class="form-label fw-bold">Username</label>
+                        <input type="text" class="form-control" id="inputUsername" name="username" placeholder="Masukkan username" required autocomplete="username">
+                    </div>
+                    <div class="mb-2">
+                        <label for="inputPassword" class="form-label fw-bold">Password</label>
+                        <input type="password" class="form-control" id="inputPassword" name="password" placeholder="Masukkan password" required autocomplete="current-password">
+                    </div>
+                </div>
+                <div class="modal-footer border-top border-3 border-dark">
+                    <button type="button" class="btn btn-outline-dark fw-bold rounded-3" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-submit-fun px-4 py-2">🔓 Buka Akses</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<?php if ($bukaModalLogin): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modalEl = document.getElementById('modalLoginEdit');
+    if (modalEl) {
+        new bootstrap.Modal(modalEl).show();
+    }
+});
+</script>
+<?php endif; ?>
 </body>
 </html>
